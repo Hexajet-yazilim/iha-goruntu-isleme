@@ -23,12 +23,16 @@ last_log_time = datetime.now()
 state = "araniyor"
 count = 0
 MAX_FRAME = 15
-Kp = 0.05
+
+Kp = 0.10                  ## kp guncellendi
+MAX_TILT_ANGLE = 25.0      ## Döngü içindeki MAX_ANGLE = 30.0 kaldırıldı, 25.0 sabitlendi
+MAX_SAFE_ERROR = 300.0     ## Öklid tabanlı Failsafe mesafe sınırı (piksel)
 
 search_start_time = datetime.now()
 search_direction = 1
 search_roll = 3
 search_period = 2.0
+search_command = 0.0         ##İlk karelerde tanımsız kalmaması için başlangıç değeri
 radar_angle = 0
 
 locked_id = None
@@ -229,7 +233,9 @@ while cap.isOpened():
         dx = center_x - 320
         dy = center_y - 240
 
-        if abs(dx) > 300 or abs(dy) > 220:
+        error_dist = math.hypot(dx, dy) ##kuş uçuşu (oklid) mesafeyı hypot fonksıyonu ile hesaplayarak maxsafeerror ile kıyaslanıyor
+
+        if error_dist > MAX_SAFE_ERROR:
             state = "EMERGENCY_HOVER"
             komut_x, komut_y = 0.0, 0.0
             roll_history.clear()
@@ -241,9 +247,9 @@ while cap.isOpened():
 
 
             # Clamping
-            MAX_ANGLE = 30.0
-            komut_x = max(-MAX_ANGLE, min(MAX_ANGLE, komut_x))
-            komut_y = max(-MAX_ANGLE, min(MAX_ANGLE, komut_y))
+            ##dongu içi maxangle silip maxtiltangle ekledım ve agreisf 30 derece açıyı 25 ile degıstırdım
+            komut_x = max(-MAX_TILT_ANGLE, min(MAX_TILT_ANGLE, komut_x))
+            komut_y = max(-MAX_TILT_ANGLE, min(MAX_TILT_ANGLE, komut_y))
 
             # MOVING AVERAGE FİLTRESİ
             roll_history.append(komut_x)
@@ -264,6 +270,26 @@ while cap.isOpened():
         cv.putText(frame, f"YON (roll:{komut_x:.2f} pitch:{komut_y:.2f})",
                    (target_x, target_y - 10), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
+    elif state == "araniyor":
+        ## Eski kodda hedef anlık olarak 1 kare bile görünmese komut_x ve 
+        # komut_y aniden 0.0'a düşüp İHA'yı havada sarsıyordu. Şimdi kuyruk ortalaması 
+        # 0.9 ile sönümlenerek yumuşak geçiş sağlanıyor.
+        if len(roll_history) > 0 and len(pitch_history) > 0:
+            komut_x = (sum(roll_history) / len(roll_history)) * 0.9
+            komut_y = (sum(pitch_history) / len(pitch_history)) * 0.9
+            roll_history.append(komut_x)
+            pitch_history.append(komut_y)
+
+    elif state == "yok":
+        ## search_command gerçek çıkışa bağlandı
+        # Eski kodda search_command sadece ekrana yazılıyordu ama 
+        # komut_x = 0.0 olarak kaldığı için İHA arama modunda yatış yapmıyordu
+        komut_x = float(search_command)
+        komut_y = 0.0
+
+    ## Bağımsız Birim Testi
+    print(f"[TEST] Durum: {state} | komut_x (Roll): {komut_x:.2f} | komut_y (Pitch): {komut_y:.2f}")
+    
     current_time = datetime.now()
     elapsed_time = (current_time - last_log_time).total_seconds()
 
